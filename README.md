@@ -4,6 +4,7 @@
 
 - **Live application:** [https://d30n5k4sgmvobz.cloudfront.net/](https://d30n5k4sgmvobz.cloudfront.net/)
 - **Runtime health:** [https://d30n5k4sgmvobz.cloudfront.net/health](https://d30n5k4sgmvobz.cloudfront.net/health)
+- **Source repository:** [https://github.com/Iamns45/reliability-memory](https://github.com/Iamns45/reliability-memory)
 
 Reliability Memory is an evidence-driven consumer-resolution workbench. One typed LangGraph node investigates damage, delivery, warranty, safety, identity, and product-quality cases; retrieves verified experience; computes the best eligible remedy; asks Amazon Bedrock for a bounded proposal; applies deterministic policy; executes only authorized workflows; verifies containment; and records the result in CockroachDB. The enterprise incident cases demonstrate that the same reliability engine generalizes without adding domain-specific graph branches.
 
