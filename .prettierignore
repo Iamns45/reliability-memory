@@ -1,0 +1,11 @@
+.aws-sam/
+.mypy_cache/
+.pytest_cache/
+.venv/
+dist/
+dist-aws-ui/
+node_modules/
+outputs/
+work/
+package-lock.json
+public/og.png

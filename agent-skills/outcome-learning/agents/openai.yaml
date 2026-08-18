@@ -1,0 +1,4 @@
+interface:
+  display_name: "Outcome Learning"
+  short_description: "Verify outcomes and retain corrections"
+  default_prompt: "Use $outcome-learning to verify the result and store a durable experience episode."

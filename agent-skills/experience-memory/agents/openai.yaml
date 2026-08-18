@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experience Memory"
+  short_description: "Retrieve verified prior experience"
+  default_prompt: "Use $experience-memory to retrieve evidence from similar verified cases."

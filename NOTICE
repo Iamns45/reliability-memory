@@ -1,0 +1,7 @@
+Reliability Memory uses the open Agent Skills specification for its five runtime
+skills. The CockroachDB application transaction design was reviewed using the
+official "designing-application-transactions" skill from:
+https://github.com/cockroachlabs/cockroachdb-skills
+
+That repository is maintained by Cockroach Labs and licensed under Apache-2.0.
+No source code from that repository is redistributed here.

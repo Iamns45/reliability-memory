@@ -1,0 +1,4 @@
+interface:
+  display_name: "Business Action"
+  short_description: "Execute authorized resolution actions"
+  default_prompt: "Use $business-action to execute only the action authorized by policy."

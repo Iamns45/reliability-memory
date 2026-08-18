@@ -1,0 +1,4 @@
+interface:
+  display_name: "Customer Context"
+  short_description: "Build a verified customer timeline"
+  default_prompt: "Use $customer-context to gather the customer facts needed for this case."

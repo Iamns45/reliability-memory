@@ -1,0 +1,4 @@
+interface:
+  display_name: "Policy and Risk"
+  short_description: "Gate actions with deterministic rules"
+  default_prompt: "Use $policy-risk to evaluate risk and determine the permitted execution mode."

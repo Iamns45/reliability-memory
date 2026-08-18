@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Evidence-specific Reliability Memory judge stack on CloudFront, Lambda, Bedrock, and CockroachDB
+
+Parameters:
+  DatabaseSecretArn:
+    Type: String
+    Description: ARN of an AWS Secrets Manager secret containing DATABASE_URL.
+  McpSecretArn:
+    Type: String
+    Description: ARN of an AWS Secrets Manager secret containing the CockroachDB service-account API key.
+  McpClusterId:
+    Type: String
+    Description: CockroachDB Cloud cluster ID used by the cluster-scoped Managed MCP connection.
+  McpEndpoint:
+    Type: String
+    Default: https://cockroachlabs.cloud/mcp
+    AllowedPattern: ^https://.*$
+    Description: CockroachDB Cloud Managed MCP HTTPS endpoint.
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: Optional CORS origin for direct API access. The judge UI uses same-origin CloudFront routing.
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-lite-v1:0
+    AllowedValues:
+      - amazon.nova-lite-v1:0
+
+Resources:
+  JudgeUiBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  JudgeUiOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-judge-ui
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ApiOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub ${AWS::StackName}-api-origin
+        CookiesConfig:
+          CookieBehavior: none
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - Accept
+            - Access-Control-Request-Headers
+            - Access-Control-Request-Method
+            - Content-Type
+            - Idempotency-Key
+            - Origin
+            - X-Request-Id
+        QueryStringsConfig:
+          QueryStringBehavior: all
+
+  JudgeUiSecurityHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-judge-ui-security
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: >-
+              default-src 'self'; base-uri 'self'; connect-src 'self';
+              font-src 'self' data:; form-action 'self'; frame-ancestors 'none';
+              img-src 'self' data:; object-src 'none'; script-src 'self';
+              style-src 'self' 'unsafe-inline'
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Permissions-Policy
+              Value: camera=(), geolocation=(), microphone=(), payment=(), usb=()
+              Override: true
+
+  ReliabilityApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref AllowedOrigin
+        AllowHeaders:
+          - Content-Type
+          - Idempotency-Key
+          - X-Request-Id
+        AllowMethods:
+          - GET
+          - POST
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogs.Arn
+        Format: '{"requestId":"$context.requestId","status":"$context.status","latency":"$context.responseLatency","route":"$context.routeKey"}'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+
+  ApiAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  ReliabilityFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ../../services/api
+      DockerTag: reliability-memory-v15
+    Properties:
+      PackageType: Image
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          DATABASE_SECRET_ARN: !Ref DatabaseSecretArn
+          COCKROACH_MCP_SECRET_ARN: !Ref McpSecretArn
+          COCKROACH_MCP_CLUSTER_ID: !Ref McpClusterId
+          COCKROACH_MCP_ENDPOINT: !Ref McpEndpoint
+          COCKROACH_MCP_DATABASE: reliability_memory
+          COCKROACH_MCP_REQUIRED: "true"
+          COCKROACH_MCP_TIMEOUT_SECONDS: "12"
+          USE_BEDROCK: "true"
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          CORS_ORIGINS: !Ref AllowedOrigin
+          LANGGRAPH_STRICT_MSGPACK: "true"
+          # Keep verify-full enabled with the cluster CA bundled in the image.
+          PGSSLROOTCERT: /var/task/certs/cockroach-cloud-ca.pem
+      Policies:
+        - Statement:
+            - Sid: InvokeApprovedBedrockModels
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+            - Sid: ReadCockroachDatabaseSecret
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref DatabaseSecretArn
+            - Sid: ReadCockroachMcpServiceAccountSecret
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref McpSecretArn
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /health
+            Method: GET
+        RunCase:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/cases/run
+            Method: POST
+        StreamCase:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/cases/stream
+            Method: POST
+        ResumeCase:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/cases/{thread_id}/resume
+            Method: POST
+        StreamResumeCase:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/cases/{thread_id}/resume/stream
+            Method: POST
+        RecordCorrection:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/corrections
+            Method: POST
+        EvidenceReceipt:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/receipts/{run_id}
+            Method: GET
+        ReliabilityEnvelope:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/reliability/envelope
+            Method: GET
+        MemoryAblation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/experiments/memory-ablation
+            Method: POST
+        PolicyComparison:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/experiments/policy-comparison
+            Method: POST
+        IdempotencyInjection:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/experiments/idempotency
+            Method: POST
+        DelayedOutcome:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReliabilityApi
+            Path: /v1/outcomes/delayed
+            Method: POST
+
+  JudgeUiDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub ${AWS::StackName} public hackathon judge demo
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        Origins:
+          - Id: JudgeUiS3Origin
+            DomainName: !GetAtt JudgeUiBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt JudgeUiOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - Id: ReliabilityApiOrigin
+            DomainName: !Sub ${ReliabilityApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: JudgeUiS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            QueryString: false
+          ResponseHeadersPolicyId: !Ref JudgeUiSecurityHeaders
+        CacheBehaviors:
+          - PathPattern: /v1/*
+            TargetOriginId: ReliabilityApiOrigin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - PATCH
+              - POST
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            # AWS managed CachingDisabled policy for dynamic API responses.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+            Compress: true
+            ResponseHeadersPolicyId: !Ref JudgeUiSecurityHeaders
+          - PathPattern: /health
+            TargetOriginId: ReliabilityApiOrigin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            # AWS managed CachingDisabled policy for dynamic API responses.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+            Compress: true
+            ResponseHeadersPolicyId: !Ref JudgeUiSecurityHeaders
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  JudgeUiBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref JudgeUiBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${JudgeUiBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${JudgeUiDistribution}
+
+  FunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ReliabilityFunction}
+      RetentionInDays: 14
+
+Outputs:
+  ApiUrl:
+    Description: Public API endpoint
+    Value: !Sub https://${ReliabilityApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  JudgeUrl:
+    Description: Public HTTPS URL to give hackathon judges
+    Value: !Sub https://${JudgeUiDistribution.DomainName}
+  JudgeUiBucketName:
+    Description: Private S3 bucket populated by scripts/deploy_aws.sh
+    Value: !Ref JudgeUiBucket
+  JudgeUiDistributionId:
+    Description: CloudFront distribution invalidated by scripts/deploy_aws.sh
+    Value: !Ref JudgeUiDistribution
