@@ -9,3 +9,4 @@ outputs/
 work/
 package-lock.json
 public/og.png
+*.drawio

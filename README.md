@@ -123,6 +123,8 @@ VERIFY / HUMAN ──► prefilled review ──► approve or edit ──► re
 
 The graph contains exactly one executable business node: `reliability_memory_agent`. `START` and `END` are LangGraph framework sentinels. Evidence evaluation, retrieval, policy, execution, verification, and learning are typed capabilities composed inside that node rather than additional graph nodes.
 
+Editable diagram: [Reliability Memory architecture (.drawio)](./docs/architecture/reliability-memory.drawio)
+
 ### Component responsibilities
 
 | Component                         | Responsibility                                                                                  |

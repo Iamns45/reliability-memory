@@ -16,6 +16,7 @@ This directory is the canonical documentation set for Reliability Memory. Docume
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | Understand the problem, scope, and acceptance criteria | [Product requirements](./product/PRODUCT_REQUIREMENTS.md)                                         |
 | Understand the complete runtime and trust boundary     | [System design](./architecture/SYSTEM_DESIGN.md)                                                  |
+| Edit the runtime architecture diagram                  | [draw.io source](./architecture/reliability-memory.drawio)                                        |
 | Integrate with the backend                             | [API contract](./architecture/API_CONTRACT.md)                                                    |
 | Understand CockroachDB ownership and relationships     | [Data model](./architecture/DATA_MODEL.md)                                                        |
 | Set up a workstation and make a change                 | [Local development](./development/LOCAL_DEVELOPMENT.md)                                           |
